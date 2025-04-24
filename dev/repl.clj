@@ -1,8 +1,7 @@
 (ns repl
   (:require [com.example :as main]
-            [com.biffweb :as biff :refer [q]]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]))
+            [datomic.api :as d]
+            [com.biffweb :as biff]))
 
 ;; REPL-driven development
 ;; ----------------------------------------------------------------------------------------
@@ -27,12 +26,6 @@
 (defn get-context []
   (biff/merge-context @main/system))
 
-(defn add-fixtures []
-  (biff/submit-tx (get-context)
-    (-> (io/resource "fixtures.edn")
-        slurp
-        edn/read-string)))
-
 (defn check-config []
   (let [prod-config (biff/use-aero-config {:biff.config/profile "prod"})
         dev-config  (biff/use-aero-config {:biff.config/profile "dev"})
@@ -54,32 +47,57 @@
      :dev-secrets (get-secrets dev-config)}))
 
 (comment
+  (defn conn [] (:conn (get-context)))
+  (defn db [] (d/db (conn)))
+
   ;; Call this function if you make a change to main/initial-system,
   ;; main/components, :tasks, :queues, config.env, or deps.edn.
   (main/refresh)
 
-  ;; Call this in dev if you'd like to add some seed data to your database. If
-  ;; you edit the seed data (in resources/fixtures.edn), you can reset the
-  ;; database by running `rm -r storage/xtdb` (DON'T run that in prod),
-  ;; restarting your app, and calling add-fixtures again.
-  (add-fixtures)
+  ;; If you edit the schema data (in resources/schema.edn), you can reset the
+  ;; database by running `rm -r storage` (DON'T run that in prod), and
+  ;; restarting your app. You do not need to do this for addidive schema changes
+  ;; (the fixtures themselves have been moved to resources/fixtures.edn).
 
-  ;; Query the database
-  (let [{:keys [biff/db] :as ctx} (get-context)]
-    (q db
-       '{:find (pull user [*])
-         :where [[user :user/email]]}))
 
-  ;; Update an existing user's email address
-  (let [{:keys [biff/db] :as ctx} (get-context)
-        user-id (biff/lookup-id db :user/email "hello@example.com")]
-    (biff/submit-tx ctx
-      [{:db/doc-type :user
-        :xt/id user-id
-        :db/op :update
-        :user/email "new.address@example.com"}]))
+  ;; query
+  (d/q '[:find ?foo .
+         :in $ ?email
+         :where
+         [?user :user/email ?email]
+         [?user :user/foo ?foo]]
+       (db)
+       "a@example.com")
 
+  (d/q '[:find ?email
+         :where
+         [?user :user/email ?email]]
+       (db))
+
+  (d/q '[:find ?foo
+         :where
+         [?user :user/email ?email]
+         [?user :user/foo ?foo]]
+       (d/history (db)))
+
+  ;; Transactions
+  (d/transact (conn) [{:db/id [:user/email "b@example.com"]
+                       :user/foo "bar"}])
+  (d/transact (conn) [[:db/retractEntity [:user/email "b@example.com"]]])
+  ;; pull syntax
+  (d/pull (db) '[*] [:user/email "b@example.com"])
+
+
+  ;; Auth module
+  (d/transact (conn) [{:auth.code/email "a@example.com"
+                     :auth.code/failed-attempts 1}])
+  (get (d/entity (db) [:auth.code/email "a@example.com"]) :auth.code/failed-attempts)
+  (d/transact (conn) [[:add-num [:auth.code/email "a@example.com"] :auth.code/failed-attempts 1]])
+
+  ;; Queue
   (sort (keys (get-context)))
+  (:datomic/monitor (get-context))
+  (:com.example/chat-clients (get-context))
 
   ;; Check the terminal for output.
   (biff/submit-job (get-context) :echo {:foo "bar"})

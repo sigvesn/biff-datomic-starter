@@ -7,11 +7,7 @@
                                :default "localhost"}]
  :biff/port     #long #or [#biff/env "PORT" 8080]
 
- :biff.xtdb/dir          "storage/xtdb"
- :biff.xtdb/topology     #keyword #or [#profile {:prod #biff/env "PROD_XTDB_TOPOLOGY"
-                                                 :default #biff/env "XTDB_TOPOLOGY"}
-                                       "standalone"]
- :biff.xtdb.jdbc/jdbcUrl #biff/secret "XTDB_JDBC_URL"
+ :biff.datomic/uri "datomic:sql://biff?jdbc:sqlite:./storage/sqlite.db"
 
  :biff.beholder/enabled         #profile {:dev true :default false}
  :biff.beholder/paths           ["src" "resources" "test"]

@@ -1,19 +1,17 @@
 (ns com.example.app
-  (:require [com.biffweb :as biff :refer [q]]
+  (:require [com.biffweb :as biff]
             [com.example.middleware :as mid]
             [com.example.ui :as ui]
             [com.example.settings :as settings]
+            [com.example.datomic :as datomic]
             [rum.core :as rum]
-            [xtdb.api :as xt]
+            [datomic.api :as d]
             [ring.adapter.jetty9 :as jetty]
             [cheshire.core :as cheshire]))
 
-(defn set-foo [{:keys [session params] :as ctx}]
-  (biff/submit-tx ctx
-    [{:db/op :update
-      :db/doc-type :user
-      :xt/id (:uid session)
-      :user/foo (:foo params)}])
+(defn set-foo [{:keys [session params datomic/conn]}]
+  (datomic/submit-tx conn {:db/id (:uid session)
+                           :user/foo (:foo params)})
   {:status 303
    :headers {"location" "/app"}})
 
@@ -32,12 +30,10 @@
    [:.text-sm.text-gray-600
     "This demonstrates updating a value with HTMX."]))
 
-(defn set-bar [{:keys [session params] :as ctx}]
-  (biff/submit-tx ctx
-    [{:db/op :update
-      :db/doc-type :user
-      :xt/id (:uid session)
-      :user/bar (:bar params)}])
+(defn set-bar [{:keys [session params datomic/conn]}]
+  (datomic/submit-tx conn
+                     {:db/id (:uid session)
+                      :user/bar (:bar params)})
   (biff/render (bar-form {:value (:bar params)})))
 
 (defn message [{:msg/keys [text sent-at]}]
@@ -45,32 +41,36 @@
    [:.text-gray-600 (biff/format-date sent-at "dd MMM yyyy HH:mm:ss")]
    [:div text]])
 
-(defn notify-clients [{:keys [com.example/chat-clients]} tx]
-  (doseq [[op & args] (::xt/tx-ops tx)
-          :when (= op ::xt/put)
-          :let [[doc] args]
-          :when (contains? doc :msg/text)
-          :let [html (rum/render-static-markup
-                      [:div#messages {:hx-swap-oob "afterbegin"}
-                       (message doc)])]
-          ws @chat-clients]
-    (jetty/send! ws html)))
+(defn notify-clients [{:keys [:com.example/chat-clients]} {:keys [db-after tx-data]}]
+  (let [query (into {} (d/q '[:find ?add ?v
+                              :in $ [[?e ?a ?v _ ?added]]
+                              :where
+                              [?a :db/ident ?add _ ?added]
+                              (or [?add :db/ident :msg/text]
+                                  [?add :db/ident :msg/sent-at])]
+                            db-after
+                            tx-data))
+        html (when (not-empty query)
+               (rum/render-static-markup
+                 [:div#messages {:hx-swap-oob "afterbegin"}
+                  (message query)]))]
+    (doseq [ws @chat-clients]
+      (jetty/send! ws html))))
 
-(defn send-message [{:keys [session] :as ctx} {:keys [text]}]
-  (let [{:keys [text]} (cheshire/parse-string text true)]
-    (biff/submit-tx ctx
-      [{:db/doc-type :msg
-        :msg/user (:uid session)
-        :msg/text text
-        :msg/sent-at :db/now}])))
+(defn send-message [{:keys [session datomic/conn biff/db]} {:keys [text]}]
+  (let [message {:msg/user    (d/entid db (:uid session))
+                 :msg/text    (:text (cheshire/parse-string text true))
+                 :msg/sent-at :db/now}]
+    (datomic/submit-tx conn message)))
 
 (defn chat [{:keys [biff/db]}]
-  (let [messages (q db
-                    '{:find (pull msg [*])
-                      :in [t0]
-                      :where [[msg :msg/sent-at t]
-                              [(<= t0 t)]]}
-                    (biff/add-seconds (java.util.Date.) (* -60 10)))]
+  (let [messages (d/q '[:find [(pull ?msg [:*]) ...]
+                        :in $ ?t0
+                        :where
+                        [?msg :msg/sent-at ?t]
+                        [(<= ?t0 ?t)]]
+                      db
+                      (biff/add-seconds (java.util.Date.) (* -60 10)))]
     [:div {:hx-ext "ws" :ws-connect "/app/chat"}
      [:form.mb-0 {:ws-send true
                   :_ "on submit set value of #message to ''"}
@@ -92,7 +92,7 @@
       (map message (sort-by :msg/sent-at #(compare %2 %1) messages))]]))
 
 (defn app [{:keys [session biff/db] :as ctx}]
-  (let [{:user/keys [email foo bar]} (xt/entity db (:uid session))]
+  (let [{:user/keys [email foo bar]} (d/entity db (:uid session))]
     (ui/page
      {}
      [:div "Signed in as " email ". "

@@ -1,0 +1,22 @@
+services:
+  biff-db:
+    image: filipesilva/datomic-pro-sqlite:1.0.7260
+    networks:
+      - biff-db
+    ports:
+      - "4335:4335"
+    healthcheck:
+      test: ["CMD-SHELL", "printf '%s\n' 'Peer.connect(\"datomic:sql://biff?jdbc:sqlite:/usr/storage/sqlite.db\");' | /usr/datomic-pro/bin/shell"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 1m
+    environment:
+      DATOMIC_DB: biff
+    volumes:
+      - ./storage:/usr/storage
+      - ./transactor.properties:/usr/datomic-pro/config/transactor.properties
+
+networks:
+  biff-db:
+    name: biff-db

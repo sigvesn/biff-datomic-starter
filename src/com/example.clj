@@ -7,17 +7,17 @@
             [com.example.ui :as ui]
             [com.example.worker :as worker]
             [com.example.schema :as schema]
+            [com.example.datomic :as datomic]
+            [com.example.auth-module :as auth-module]
             [clojure.test :as test]
             [clojure.tools.logging :as log]
             [clojure.tools.namespace.repl :as tn-repl]
-            [malli.core :as malc]
-            [malli.registry :as malr]
             [nrepl.cmdline :as nrepl-cmd])
   (:gen-class))
 
 (def modules
   [app/module
-   (biff/authentication-module {})
+   auth-module/module
    home/module
    schema/module
    worker/module])
@@ -43,28 +43,22 @@
   (generate-assets! ctx)
   (test/run-all-tests #"com.example.*-test"))
 
-(def malli-opts
-  {:registry (malr/composite-registry
-              malc/default-registry
-              (apply biff/safe-merge (keep :schema modules)))})
-
 (def initial-system
-  {:biff/modules #'modules
+  {:biff/merge-context-fn #'datomic/assoc-db
+   :biff/modules #'modules
    :biff/send-email #'email/send-email
    :biff/handler #'handler
-   :biff/malli-opts #'malli-opts
    :biff.beholder/on-save #'on-save
    :biff.middleware/on-error #'ui/on-error
-   :biff.xtdb/tx-fns biff/tx-fns
    :com.example/chat-clients (atom #{})})
 
 (defonce system (atom {}))
 
 (def components
   [biff/use-aero-config
-   biff/use-xtdb
+   datomic/use-datomic
    biff/use-queues
-   biff/use-xtdb-tx-listener
+   datomic/use-tx-listener
    biff/use-htmx-refresh
    biff/use-jetty
    biff/use-chime

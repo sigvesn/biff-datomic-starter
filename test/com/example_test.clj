@@ -2,44 +2,64 @@
   (:require [cheshire.core :as cheshire]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [com.biffweb :as biff :refer [test-xtdb-node]]
-            [com.example :as main]
+            [com.example.auth-module :as auth-module]
             [com.example.app :as app]
-            [malli.generator :as mg]
+            [com.example.datomic :as datomic]
             [rum.core :as rum]
-            [xtdb.api :as xt]))
+            [datomic.api :as d]))
 
 (deftest example-test
   (is (= 4 (+ 2 2))))
 
-(defn get-context [node]
-  {:biff.xtdb/node  node
-   :biff/db         (xt/db node)
-   :biff/malli-opts #'main/malli-opts})
+(def test-user
+  #:user{:email "test@user"
+         :foo   "bar"
+         :bar   "baz"})
+
+(def ^:dynamic *context* nil)
+
+(defmacro with-db
+  [& body]
+  `(let [context# (datomic/use-datomic {:biff.datomic/uri "datomic:mem://example"})
+         context# (assoc context# :biff/db (d/db (:datomic/conn context#)))]
+     (binding [*context* context#]
+       (try ~@body
+            (finally
+              (when-let [conn# (:datomic/conn *context*)]
+                (d/delete-database (:biff.datomic/uri *context*))))))))
 
 (deftest send-message-test
-  (with-open [node (test-xtdb-node [])]
-    (let [message (mg/generate :string)
-          user    (mg/generate :user main/malli-opts)
-          ctx     (assoc (get-context node) :session {:uid (:xt/id user)})
+  (with-db
+    (let [message "Test message"
+          _       (datomic/submit-tx (:datomic/conn *context*) test-user)
+          user-id (auth-module/get-user-id (d/db (:datomic/conn *context*)) (:user/email test-user))
+          _       (is (some? user-id))
+          ctx     (assoc *context* :session {:uid user-id})
           _       (app/send-message ctx {:text (cheshire/generate-string {:text message})})
-          db      (xt/db node) ; get a fresh db value so it contains any transactions
-                               ; that send-message submitted.
-          doc     (biff/lookup db :msg/text message)]
+          doc     (d/q '[:find ?uid .
+                         :in $ ?text
+                         :where
+                         [?e :msg/text ?text]
+                         [?e :msg/user ?uid]]
+                       (d/db (:datomic/conn *context*))
+                       message)]
       (is (some? doc))
-      (is (= (:msg/user doc) (:xt/id user))))))
+      (is (= doc (:uid (:session ctx)))))))
 
 (deftest chat-test
-  (let [n-messages (+ 3 (rand-int 10))
-        now        (java.util.Date.)
-        messages   (for [doc (mg/sample :msg (assoc main/malli-opts :size n-messages))]
-                     (assoc doc :msg/sent-at now))]
-    (with-open [node (test-xtdb-node messages)]
-      (let [response (app/chat {:biff/db (xt/db node)})
-            html     (rum/render-html response)]
-        (is (str/includes? html "Messages sent in the past 10 minutes:"))
-        (is (not (str/includes? html "No messages yet.")))
-        ;; If you add Jsoup to your dependencies, you can use DOM selectors instead of just regexes:
-        ;(is (= n-messages (count (.select (Jsoup/parse html) "#messages > *"))))
-        (is (= n-messages (count (re-seq #"init send newMessage to #message-header" html))))
-        (is (every? #(str/includes? html (:msg/text %)) messages))))))
+  (with-db
+    (let [messages (for [message ["Test message 1"
+                                  "Test message 2"
+                                  "Test message 3"]]
+                     #:msg{:user "user"
+                           :text message
+                           :sent-at :db/now})
+          _        (datomic/submit-tx (:datomic/conn *context*) (into [(assoc test-user :db/id "user")] messages))
+          response (app/chat {:biff/db (d/db (:datomic/conn *context*))})
+          html     (rum/render-html response)]
+      (is (str/includes? html "Messages sent in the past 10 minutes:"))
+      (is (not (str/includes? html "No messages yet.")))
+      ;; If you add Jsoup to your dependencies, you can use DOM selectors instead of just regexes:
+      ;(is (= n-messages (count (.select (Jsoup/parse html) "#messages > *"))))
+      (is (= (count messages) (count (re-seq #"init send newMessage to #message-header" html))))
+      (is (every? #(str/includes? html (:msg/text %)) messages)))))

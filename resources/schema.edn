@@ -1,0 +1,72 @@
+;; Datomic schema, see https://github.com/avescodes/conformity
+{:example/_user
+ {:txes
+  [[{:db/ident              :user/email
+     :db/doc                "Email address of the user."
+     :db/unique             :db.unique/identity
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :user/joined-at
+     :db/doc                "Time when the user joined the service."
+     :db/valueType          :db.type/instant
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :user/foo
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :user/bar
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}]]}
+
+ :example/_msg
+ {:txes
+  [[{:db/ident              :msg/user
+     :db/doc                "The user that sent the message."
+     :db/valueType          :db.type/ref
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :msg/text
+     :db/doc                "The text of the message."
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :msg/sent-at
+     :db/doc                "Time when the message was sent."
+     :db/valueType          :db.type/instant
+     :db/cardinality        :db.cardinality/one}]]}
+
+ :example/_auth-code
+ {:txes
+  [[{:db/ident              :auth.code/email
+     :db/doc                "Email address of the user."
+     :db/unique             :db.unique/identity
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :auth.code/code
+     :db/doc                "The code that was sent to the user."
+     :db/valueType          :db.type/string
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :auth.code/created-at
+     :db/doc                "Time when the code was created."
+     :db/valueType          :db.type/instant
+     :db/cardinality        :db.cardinality/one}
+
+    {:db/ident              :auth.code/failed-attempts
+     :db/doc                "Number of failed attempts to use the code."
+     :db/valueType          :db.type/long
+     :db/cardinality        :db.cardinality/one}]]}
+
+ :example/fixtures
+ {:txes
+  [[{:db/id "fixture"
+     :user/email "a@example.com"
+     :user/foo "Some Value"
+     :user/joined-at #inst "2024-10-25T10:00:00Z"}
+
+    #_{:msg/user "fixture"
+       :msg/text "hello there"
+       :msg/sent-at #inst "2024-10-25T10:00:00Z"}]]}}
