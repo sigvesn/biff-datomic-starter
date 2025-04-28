@@ -6,7 +6,6 @@
             [com.example.middleware :as mid]
             [com.example.ui :as ui]
             [com.example.worker :as worker]
-            [com.example.schema :as schema]
             [com.example.datomic :as datomic]
             [com.example.auth-module :as auth-module]
             [clojure.test :as test]
@@ -19,7 +18,6 @@
   [app/module
    auth-module/module
    home/module
-   schema/module
    worker/module])
 
 (def routes [["" {:middleware [mid/wrap-site-defaults]}
